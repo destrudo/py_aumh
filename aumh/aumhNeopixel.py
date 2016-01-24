@@ -22,6 +22,7 @@ import struct
 import time
 import socket
 import colorsys
+import logging
 
 from aumh import *
 from aumh import isInt
@@ -40,7 +41,11 @@ class StrandInfo:
 		self.pixels = {}
 
 class aumhNeopixel:
-	def __init__(self, UMH_Instance):
+	def __init__(self, UMH_Instance, logmethod=None, logfile=None):
+		self.logmethod = logmethod
+		if logfile:
+			self.logConfigure(logfile)
+
 		self.device = UMH_Instance
 
 		self.begin()
@@ -70,7 +75,32 @@ class aumhNeopixel:
 
 		self.strips = {}
 
+	def logConfigure(self, logfile=None):
+		if self.logmethod == "logger":
+			if not logfile:
+				print("aumh.logConfigure() called as logger type without filename for log.")
+				sys.exit(1)
 
+			self.logger = logging.getLogger("aumhNeopixel")
+			self.logger.setLevel(logging.INFO)
+			self.logformatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			self.loghandler = logging.FileHandler(logfile)
+			self.loghandler.setFormatter(self.logformatter)
+			self.logger.addHandler(self.loghandler)
+
+
+	def log(self, data, mode=None):
+		if not self.logmethod or self.logmethod == "print":
+			print(data)
+		elif self.logmethod == "logger":
+			if mode == "err":
+				self.logger.error(data)
+			elif mode == "warn":
+				self.logger.warning(data)
+			elif mode == "crit":
+				self.logger.critical(data)
+			else: #Mode is info or something else.
+				self.logger.info(data)
 
 	# begin
 	#
@@ -150,14 +180,14 @@ class aumhNeopixel:
 				buffer = self.ldelete(buffer, dataIn)
 
 			else:
-				print("UARTNeopixel.createMessage(), Unknown command was provided: '%s'" % str(dataIn["command"]))
+				self.log("UARTNeopixel.createMessage(), Unknown command was provided: '%s'" % str(dataIn["command"]))
 				return None
 
 			buffer = self.finishMessage(buffer)
 
 			return buffer
 		except:
-			print ("UARTNeopixel.createMessage(), exception with data: '%s'" % str(dataIn))
+			self.log ("UARTNeopixel.createMessage(), exception with data: '%s'" % str(dataIn))
 
 		return None
 
@@ -301,7 +331,7 @@ class aumhNeopixel:
 
 		try:
 			if "NAK" in out:
-				print("UARTNeopixel.np_get(), error, command failed (NAK)")
+				self.log("UARTNeopixel.np_get(), error, command failed (NAK)")
 				return None
 		except:
 			errString = "UARTNeopixel.np_get(), error handling output data."
@@ -309,7 +339,7 @@ class aumhNeopixel:
 			if id not in self.strips:
 				errString += " strip id %s not found in strips data." % str(id)
 
-			print(errString)
+			self.log(errString)
 			return None
 
 		out = out[:-5] #Remove the ACK
@@ -354,7 +384,7 @@ class aumhNeopixel:
 		msgCtd = self.createMessage(data)
 
 		if self.sendMessage(msgCtd):
-			print("UARTNeopixel.np_set(), sendMessage call failure.")
+			self.log("UARTNeopixel.np_set(), sendMessage call failure.")
 
 	def np_add(self, id, pin, length):
 		data = {
@@ -368,7 +398,7 @@ class aumhNeopixel:
 		}
 
 		if self.sendMessage(self.createMessage(data)):
-			print("UARTNeopixel.np_add(), sendMessage call failure.")
+			self.log("UARTNeopixel.np_add(), sendMessage call failure.")
 
 	def np_clear(self, id):
 		data = {
@@ -381,7 +411,7 @@ class aumhNeopixel:
 		}
 
 		if self.sendMessage(self.createMessage(data)):
-			print("UARTNeopixel.np_clear(), sendMessage call failure.")
+			self.log("UARTNeopixel.np_clear(), sendMessage call failure.")
 
 	def np_del(self, id):
 		data = {
@@ -394,7 +424,7 @@ class aumhNeopixel:
 		}
 
 		if self.sendMessage(self.createMessage(data)):
-			print("UARTNeopixel.np_del(), sendMessage call failure.")
+			self.log("UARTNeopixel.np_del(), sendMessage call failure.")
 
 	def np_manage(self):
 		data = {
@@ -428,7 +458,7 @@ class aumhNeopixel:
 					self.strips[pID]["length"] = length 
 
 		except:
-			print("UARTNeopixel.np_manage(), issue handling strand instance data.")
+			self.log("UARTNeopixel.np_manage(), issue handling strand instance data.")
 			return None
 
 		return out #FIXME, make this baby return self.strips.
@@ -441,19 +471,19 @@ class aumhNeopixel:
 		# 'endColor', the last color to use, as an RGB list []
 
 		if "start" not in dataIn:
-			print("UARTNeopixel.np_gradient(), no start in dataIn.")
+			self.log("UARTNeopixel.np_gradient(), no start in dataIn.")
 			return None
 
 		if "end" not in dataIn:
-			print("UARTNeopixel.np_gradient(), no end in dataIn.")
+			self.log("UARTNeopixel.np_gradient(), no end in dataIn.")
 			return None
 
 		if "startColor" not in dataIn or len(dataIn["startColor"]) != 3:
-			print("UARTNeopixel.np_gradient(), no startColor in dataIn.")
+			self.log("UARTNeopixel.np_gradient(), no startColor in dataIn.")
 			return None
 
 		if "endColor" not in dataIn or len(dataIn["endColor"]) != 3:
-			print("UARTNeopixel.np_gradient(), no endColor in dataIn.")
+			self.log("UARTNeopixel.np_gradient(), no endColor in dataIn.")
 			return None
 
 		#Convert startColor and endColor to HSV values
@@ -481,4 +511,4 @@ class aumhNeopixel:
 			data["data"]["leds"][nrp+int(dataIn["start"])] = [ int(lRGB[0]) % 256, int(lRGB[1]) % 256, int(lRGB[2]) % 256 ]
 
 		if self.sendMessage(self.createMessage(data)):
-			print("UARTNeopixel.np_gradient(), sendMessage call failure.")
+			self.log("UARTNeopixel.np_gradient(), sendMessage call failure.")

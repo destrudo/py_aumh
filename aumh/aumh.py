@@ -22,6 +22,7 @@ import time
 import socket
 import math #We needed the ceil() function.
 import multiprocessing
+import logging
 
 # Debug value
 DEBUG=0
@@ -108,7 +109,12 @@ def lrcsum(dataIn):
 # This is the UART_MH class.  Only one class instance per serial device unless
 # you want to see resource conflicts.
 class aumh:
-	def __init__(self, serialInterface=None, lbaud=None):
+	def __init__(self, serialInterface=None, lbaud=None, logmethod=None, logfile=None):
+
+		self.logmethod = logmethod
+		if logfile:
+			self.logConfigure(logfile)
+
 		self.running = False
 		if serialInterface:
 			self.serName = serialInterface
@@ -121,6 +127,34 @@ class aumh:
 		if lbaud:
 			global BAUD
 			BAUD = lbaud
+
+	def logConfigure(self, logfile=None):
+		if self.logmethod == "logger":
+			if not logfile:
+				print("aumh.logConfigure() called as logger type without filename for log.")
+				sys.exit(1)
+
+			self.logger = logging.getLogger("aumh")
+			self.logger.setLevel(logging.INFO)
+			self.logformatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			self.loghandler = logging.FileHandler(logfile)
+			self.loghandler.setFormatter(self.logformatter)
+			self.logger.addHandler(self.loghandler)
+
+
+	def log(self, data, mode=None):
+		if (not self.logmethod) or (self.logmethod == "print"):
+			print(data)
+
+		elif self.logmethod == "logger":
+			if mode == "err":
+				self.logger.error(data)
+			elif mode == "warn":
+				self.logger.warning(data)
+			elif mode == "crit":
+				self.logger.critical(data)
+			else: #Mode is info or something else.
+				self.logger.info(data)
 
 	#This should just get moved into the constructor.
 	def begin(self):
@@ -181,7 +215,7 @@ class aumh:
 			try:
 				self.ser = serial.Serial(str(self.serName), self.serialBaud, timeout=5)
 			except:
-				print("UART_MH.serialReset() unable to create new serial instance.")
+				self.log("UART_MH.serialReset() unable to create new serial instance.","err")
 				return -1
 		else:
 			try:
@@ -193,7 +227,7 @@ class aumh:
 			try:
 				self.ser = serial.Serial(str(self.serName), self.serialBaud, timeout=5)
 			except:
-				print("UART_MH.serialReset() unable to create new serial instance from previous instance.")
+				self.log("UART_MH.serialReset() unable to create new serial instance from previous instance.","err")
 				return -1
 
 		try:
@@ -201,10 +235,10 @@ class aumh:
 				try:
 					self.ser.open()
 				except:
-					print("UART_MH.serialReset() unable to open serial interface.")
+					self.log("UART_MH.serialReset() unable to open serial interface.","err")
 					return -2
 		except:
-			print("UART_MH.serialReset() unable to call serial.isOpen().")
+			self.log("UART_MH.serialReset() unable to call serial.isOpen().","err")
 			return -3
 
 		return 0
@@ -234,7 +268,6 @@ class aumh:
 
 	#Compute the lrcsum for the message
 	def finishMessage(self,curMsg):
-
 		if len(curMsg) > 63:
 			msgFrags = int(math.ceil((float(len(curMsg))/float(63))))
 			if (msgFrags <= 255): #If it's in our range, cool, we'll set it.
@@ -249,7 +282,7 @@ class aumh:
 	def UARTWaitIn(self, timeout, expected=5):
 		ltimeout = time.time() + timeout
 		if not isinstance(self.ser, serial.Serial):
-			print("UART_MH.UARTWaitIn(), serial instance does not exist.")
+			self.log("UART_MH.UARTWaitIn(), serial instance does not exist.")
 			return -1
 
 		counter = 0
@@ -261,7 +294,7 @@ class aumh:
 						return 1
 				counter+=1
 		except:
-			print("UART_MH.UARTWaitIn(), failed to read serial interface.")
+			self.log("UART_MH.UARTWaitIn(), failed to read serial interface.","err")
 			self.ser.flush()
 			return -1
 
@@ -274,7 +307,7 @@ class aumh:
 		t_000 = time.time()
 
 		if isinstance(buf, int):
-			print("UART_MH.sendMessage(), buffer incomplete.")
+			self.log("UART_MH.sendMessage(), buffer incomplete.","warn")
 			return 1
 	
 		self.serialSema.acquire()
@@ -283,17 +316,17 @@ class aumh:
 			if isinstance(self.ser, serial.Serial):
 				if not self.ser.isOpen():
 					if self.serialReset():
-						print("UART_MH.sendMessage(), Serial reset failed.")
+						self.log("UART_MH.sendMessage(), Serial reset failed.","err")
 						self.serialSema.release()
 						return 2
 			else:
 				if self.serialReset():
-					print("UART_MH.sendMessage(), serial create failed.")
+					self.log("UART_MH.sendMessage(), serial create failed.","crit")
 					self.serialSema.release()
 					return 2
 
 		except:
-			print("UART_MH.sendMessage(), failed when polling serial interface.")
+			self.log("UART_MH.sendMessage(), failed when polling serial interface.","err")
 			self.serialSema.release()
 			return 2
 
@@ -312,7 +345,7 @@ class aumh:
 
 				while not chunkComplete:
 					if time.time() > chunkTL:
-						print("UART_MH.sendMessage(), chunk send timed out, abandoning attempt.")
+						self.log("UART_MH.sendMessage(), chunk send timed out, abandoning attempt.")
 						self.serialSema.release()
 						return 20
 
@@ -320,7 +353,7 @@ class aumh:
 						try:
 							self.ser.write(b)
 						except:
-							print("UART_MH.sendMessage(), failed to write to serial interface with fragment.")
+							self.log("UART_MH.sendMessage(), failed to write to serial interface with fragment.")
 							self.serialSema.release()
 							#  If we have a failure to write, it's unlikely that we'll get it on the second pass.
 							# Bail out now so that the controller doesn't need to deal with bullshit.
@@ -342,12 +375,12 @@ class aumh:
 				try:
 					self.ser.write(b)
 				except:
-					print("UART_MH.sendMessage(), failed to write to serial interface")
+					self.log("UART_MH.sendMessage(), failed to write to serial interface")
 					self.serialSema.release()
 					return 10
 
 		if self.UARTWaitIn(5):
-			print("UART_MH.sendMessage(), input data timed out.")
+			self.log("UART_MH.sendMessage(), input data timed out.")
 			self.serialSema.release()
 			return 4
 	
@@ -362,11 +395,11 @@ class aumh:
 			while(self.ser.inWaiting()):
 				retd+=self.ser.readline()
 				time.sleep(0.05) #I really do not want this delay here, but I can't think of a better way
-				print("Read another line during message")
+				self.log("Read another line during message")
 
 
 		except:
-			print("UART_MH.sendMessage(), failed to readline (Response data unknown).")
+			self.log("UART_MH.sendMessage(), failed to readline (Response data unknown).")
 			self.serialSema.release()
 			return 5
 
@@ -384,7 +417,7 @@ class aumh:
 	# Send a management message request to the firmware.
 	def sendManageMessage(self,buf):
 		if isinstance(buf, int):
-			print("UART_MH.sendManageMessage(), buffer incomplete.")
+			self.log("UART_MH.sendManageMessage(), buffer incomplete.")
 			return 1
 
 		self.serialSema.acquire()
@@ -393,16 +426,16 @@ class aumh:
 			if isinstance(self.ser, serial.Serial):
 				if not self.ser.isOpen():
 					if self.serialReset():
-						print("UART_MH.sendManageMessage(), serial reset failed.")
+						self.log("UART_MH.sendManageMessage(), serial reset failed.")
 						self.serialSema.release()
 						return 2
 			else:
 				if self.serialReset():
-					print("UART_MH.sendManageMessage(), serial create failed.")
+					self.log("UART_MH.sendManageMessage(), serial create failed.")
 					self.serialSema.release()
 					return 2	
 		except:
-			print("UART_MH.sendManageMessage(), failed when polling serial interface.")
+			self.log("UART_MH.sendManageMessage(), failed when polling serial interface.")
 			self.serialSema.release()
 			return 2
 
@@ -410,7 +443,7 @@ class aumh:
 			try:
 				self.ser.write(b)
 			except:
-				print("UART_MH.sendManageMessage(), failed to write to serial interface")
+				self.log("UART_MH.sendManageMessage(), failed to write to serial interface")
 				self.serialSema.release()
 				return 10
 
@@ -424,12 +457,12 @@ class aumh:
 			while not self.ser.inWaiting():
 				if (counter % 1000) == 0:
 					if time.time() > ltimeout:
-						print("UART_MH.sendManageMessage(), timeout in first completion loop.")
+						self.log("UART_MH.sendManageMessage(), timeout in first completion loop.")
 						self.serialSema.release()
 						return 1
 				counter+=1
 		except:
-			print("UART_MH.sendManageMessage(), failed when waiting for first response.")
+			self.log("UART_MH.sendManageMessage(), failed when waiting for first response.")
 			self.serialSema.release()
 			return 4
 
@@ -441,7 +474,7 @@ class aumh:
 		while not complete:
 			if (counter % 1000) == 0:
 				if time.time() > ltimeout:
-					print("UART_MH.sendManageMessage(), timeout in second completion loop.")
+					self.log("UART_MH.sendManageMessage(), timeout in second completion loop.")
 					self.serialSema.release()
 					return 5
 
@@ -449,7 +482,7 @@ class aumh:
 				while self.ser.inWaiting() > 0:
 					oBuf+=self.ser.read(1)
 			except:
-				print("UART_MH.sendManageMessage(), failed when waiting for second response.")
+				self.log("UART_MH.sendManageMessage(), failed when waiting for second response.")
 				self.serialSema.release()
 				return 6
 

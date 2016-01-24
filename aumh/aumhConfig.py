@@ -21,6 +21,7 @@ import sys
 import struct
 import time
 import socket
+import logging
 
 from aumh import *
 from aumh import isInt
@@ -29,7 +30,10 @@ from aumh import listOverlay
 from aumh import aumh
 
 class aumhConfig:
-	def __init__(self, UMH_Instance):
+	def __init__(self, UMH_Instance, logmethod=None, logfile=None):
+		self.logmethod = logmethod
+		if logfile:
+			self.logConfigure(logfile)
 
 		self.device = UMH_Instance
 
@@ -43,9 +47,41 @@ class aumhConfig:
 			self.device.begin()
 
 		#For right now, we're gonna do it this way....
-		if not self.cfg_manage():
-			print("UART_Config.init, got no data from manage.")
-			sys.exit(1)
+		good = False
+		while not good:
+			if not self.cfg_manage():
+				self.log("Got no data from manage.")
+				time.sleep(10)
+				continue
+
+			break
+
+	def logConfigure(self, logfile=None):
+		if self.logmethod == "logger":
+			if not logfile:
+				print("aumh.logConfigure() called as logger type without filename for log.")
+				sys.exit(1)
+
+			self.logger = logging.getLogger("aumhConfig")
+			self.logger.setLevel(logging.INFO)
+			self.logformatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			self.loghandler = logging.FileHandler(logfile)
+			self.loghandler.setFormatter(self.logformatter)
+			self.logger.addHandler(self.loghandler)
+
+
+	def log(self, data, mode=None):
+		if not self.logmethod or self.logmethod == "print":
+			print(data)
+		elif self.logmethod == "logger":
+			if mode == "err":
+				self.logger.error(data)
+			elif mode == "warn":
+				self.logger.warning(data)
+			elif mode == "crit":
+				self.logger.critical(data)
+			else: #Mode is info or something else.
+				self.logger.info(data)
 
 	def createMessage(self, dataIn):
 		if "command" not in dataIn or dataIn["command"] not in self.subcommands:
@@ -58,7 +94,7 @@ class aumhConfig:
 			return buffer #special case (And only at time of writing)
 
 		else:
-			print("UART_Config.createMessage(), Unknown command.")
+			self.log("UART_Config.createMessage(), Unknown command.")
 			return None
 
 		buffer = self.device.finishMessage(buffer)
@@ -74,7 +110,12 @@ class aumhConfig:
 
 		rawMsg = self.device.sendManageMessage(buffer)
 
-		if "NAK" in rawMsg:
+		try:
+			if "NAK" in rawMsg:
+				self.log("Bad response in lmanage.")
+				return None
+		except:
+			self.log("Exception in lmanage.", "err")
 			return None
 
 		#We could still have an issue though...

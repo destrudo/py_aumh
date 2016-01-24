@@ -20,6 +20,7 @@ import sys
 import struct
 import time
 import socket
+import logging
 
 from aumh import *
 from aumh import isInt
@@ -46,7 +47,11 @@ class PinInfo:
 		self.type = _type
 
 class aumhDigital:
-	def __init__(self, UMH_Instance):
+	def __init__(self, UMH_Instance, logmethod=None, logfile=None):
+		self.logmethod = logmethod
+		if logfile:
+			self.logConfigure(logfile)
+
 		self.device = UMH_Instance
 
 		self.begin()
@@ -74,6 +79,33 @@ class aumhDigital:
 		}
 
 		self.pins = {}
+
+	def logConfigure(self, logfile=None):
+		if self.logmethod == "logger":
+			if not logfile:
+				print("aumh.logConfigure() called as logger type without filename for log.")
+				sys.exit(1)
+
+			self.logger = logging.getLogger("aumhDigital")
+			self.logger.setLevel(logging.INFO)
+			self.logformatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			self.loghandler = logging.FileHandler(logfile)
+			self.loghandler.setFormatter(self.logformatter)
+			self.logger.addHandler(self.loghandler)
+
+
+	def log(self, data, mode=None):
+		if not self.logmethod or self.logmethod == "print":
+			print(data)
+		elif self.logmethod == "logger":
+			if mode == "err":
+				self.logger.error(data)
+			elif mode == "warn":
+				self.logger.warning(data)
+			elif mode == "crit":
+				self.logger.critical(data)
+			else: #Mode is info or something else.
+				self.logger.info(data)
 
 
 
@@ -120,14 +152,14 @@ class aumhDigital:
 				buffer = self.lchange(buffer, dataIn)
 
 			else:
-				print("UARTDigital.createMessage(), Unknown command was provided: '%s'" % str(dataIn["command"]))
+				self.log("UARTDigital.createMessage(), Unknown command was provided: '%s'" % str(dataIn["command"]))
 				return None
 
 			buffer = self.device.finishMessage(buffer)
 
 			return buffer
 		except:
-			print("UARTDigital.createMessage(), exception with data: '%s'" % str(dataIn))
+			self.log("UARTDigital.createMessage(), exception with data: '%s'" % str(dataIn))
 
 		return None
 
@@ -249,8 +281,7 @@ class aumhDigital:
 
 
 		buffer = self.device.finishMessage(buffer)
-		# print("Buffer from lmanage:")
-		# pprint.pprint(buffer)
+
 		for i in range(0, 6):
 			buffer.append(self.subcommands["manage"])
 		

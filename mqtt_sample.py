@@ -16,13 +16,13 @@ from aumh import *
 import pprint
 import time
 
-mqttI = aumhMQTT("127.0.0.1",1883)
-UMH_00 = aumh("/dev/ttyUSB0")
+mqttI = aumhMQTT("127.0.0.1",1883,"logger","./LOGGY_THE_LOG")
+UMH_00 = aumh("/dev/ttyUSB0","logger","./LOGGY_THE_LOG")
 
 #Instance all of the instances you want!
-uartNeopixel_00 = aumhNeopixel(UMH_00)
-uartConfig_00 = aumhConfig(UMH_00)
-uartDigital_00 = aumhDigital(UMH_00)
+uartNeopixel_00 = aumhNeopixel(UMH_00,"logger","./LOGGY_THE_LOG")
+uartConfig_00 = aumhConfig(UMH_00,"logger","./LOGGY_THE_LOG")
+uartDigital_00 = aumhDigital(UMH_00,"logger","./LOGGY_THE_LOG")
 
 #add all the instances you want.
 mqttI.add_instance("mhconfig", uartConfig_00, uartConfig_00.device.identityS)

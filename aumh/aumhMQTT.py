@@ -21,6 +21,7 @@ import time
 import socket
 import copy
 import multiprocessing
+import logging
 
 import paho.mqtt.client as mqtt
 
@@ -86,7 +87,12 @@ class UARTDevices:
 
 #This will be the class to handle mqtt messages
 class aumhMQTT:
-	def __init__(self,hostname,port):
+	def __init__(self, hostname, port, logmethod=None, logfile=None):
+
+		self.logmethod = logmethod
+		if logfile:
+			self.logConfigure(logfile)
+
 		self.hostname = str(socket.gethostname())
 		self.devices = {}
 
@@ -110,6 +116,33 @@ class aumhMQTT:
 		self.threadPostSema = multiprocessing.Semaphore()
 		self.threadPostSema.release()
 
+	def logConfigure(self, logfile=None):
+		if self.logmethod == "logger":
+			if not logfile:
+				print("aumh.logConfigure() called as logger type without filename for log.")
+				sys.exit(1)
+
+			self.logger = logging.getLogger("aumh")
+			self.logger.setLevel(logging.INFO)
+			self.logformatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			self.loghandler = logging.FileHandler(logfile)
+			self.loghandler.setFormatter(self.logformatter)
+			self.logger.addHandler(self.loghandler)
+
+
+	def log(self, data, mode=None):
+		if not self.logmethod or self.logmethod == "print":
+			print(data)
+		elif self.logmethod == "logger":
+			if mode == "err":
+				self.logger.error(data)
+			elif mode == "warn":
+				self.logger.warning(data)
+			elif mode == "crit":
+				self.logger.critical(data)
+			else: #Mode is info or something else.
+				self.logger.info(data)
+
 	def has_instance(self, name, id):
 		if len(self.devices) == 0:
 			return False
@@ -127,12 +160,12 @@ class aumhMQTT:
 
 	def add_instance(self, name, instance, id):
 		if not id:
-			print("UART_MH_MQTT.add_instance, got no ID.")
+			self.log("UART_MH_MQTT.add_instance, got no ID.")
 			return None
 
 		if id not in self.devices:
 			if name is not "mhconfig":
-				print("UART_MH_MQTT.add_instance, not configured device and instance was not mhconfig.")
+				self.log("UART_MH_MQTT.add_instance, not configured device and instance was not mhconfig.")
 				return None
 
 			self.devices[id] = {}
@@ -140,10 +173,10 @@ class aumhMQTT:
 
 		else:
 			if "mhconfig" not in self.devices[id]: #Triple check so we know if we have some oddity.
-				print("UART_MH_MQTT.add_instance, strangely misconfigured device id: %s" % str(id))
+				self.log("UART_MH_MQTT.add_instance, strangely misconfigured device id: %s" % str(id))
 
 			if name in self.devices[id]: #Issue a warning that we're overwriting the old device instance
-				print("UART_MH_MQTT.add_instance, device->instance name already in use.  Replacing it.")
+				self.log("UART_MH_MQTT.add_instance, device->instance name already in use.  Replacing it.")
 
 			self.devices[id][name] = instance
 
@@ -188,7 +221,7 @@ class aumhMQTT:
 			msgIdent = msg.topic.split("/")[3]
 
 			if msgIdent not in self.devices:
-				print("UART_MH_MQTT.on_message, ident [%s] not in devices." % str(msgIdent))
+				self.log("UART_MH_MQTT.on_message, ident [%s] not in devices." % str(msgIdent))
 				return None
 
 		except:
@@ -198,24 +231,24 @@ class aumhMQTT:
 
 		if "neopixel" in msg.topic and "neopixel" in self.devices[msgIdent]:
 			if len(msgL) < 5:
-				print("Bogus neopixel message received. [incomplete data]")
+				self.log("Bogus neopixel message received. [incomplete data]")
 				return None
 
 			if isInt(msgL[MSG_STRAND_OFFSET]):
 				if (int(msgL[MSG_STRAND_OFFSET]) > 254) or (int(msgL[MSG_STRAND_OFFSET]) < 0):
-					print("Bogus neopixel message received. [strand id error]")
+					self.log("Bogus neopixel message received. [strand id error]")
 					return None
 
 			else:
 				if (msgL[MSG_STRAND_OFFSET] != "add"):
-					print("Bogus neopixel message received. [unexpected topic '%s']" % str(msgL[4]))
+					self.log("Bogus neopixel message received. [unexpected topic '%s']" % str(msgL[4]))
 					return None
 
 			if msgL[MSG_STRAND_OFFSET] == "add":
 				data = msg.payload.split(",")
 #FIXME, make sure the data len value is correct.
 				if len(data) != 3:
-					print("Bogus neopixel message received. [add missing data]")
+					self.log("Bogus neopixel message received. [add missing data]")
 					return None
 
 				umhmsg = {
@@ -229,7 +262,7 @@ class aumhMQTT:
 				}
 
 				if self.devices[msgIdent]["neopixel"].sendMessage(self.devices[msgIdent]["neopixel"].createMessage(umhmsg)):
-					print("neopixel mqtt issue sending message.")
+					self.log("neopixel mqtt issue sending message.")
 
 				return None #After this we want to leave.
 
@@ -265,11 +298,11 @@ class aumhMQTT:
 
 					for iChk in rgbS: #Do we really want to perform this check?
 						if iChk == "" or iChk == None: #If we have a blank message.
-							print("neopixel mqtt blank message.")
+							self.log("neopixel mqtt blank message.")
 							return None
 
 						if int(iChk) < 0 or int(iChk) > 255:
-							print("neopixel mqtt message outside int limits.")
+							self.log("neopixel mqtt message outside int limits.")
 							return None
 
 					umhmsg["data"]["leds"] = { str(msgL[MSG_PIXEL_OFFSET]):rgbI }
@@ -278,7 +311,7 @@ class aumhMQTT:
 						umhmsg["command"] = "ctrli"
 
 						if self.devices[msgIdent]["neopixel"].sendMessage(self.devices[msgIdent]["neopixel"].createMessage(umhmsg)):
-							print("neopixel mqtt seti issue sending message.")
+							self.log("neopixel mqtt seti issue sending message.")
 
 						return None #break away so that we don't need to deal with anything else.
 
@@ -330,14 +363,14 @@ class aumhMQTT:
 
 				elif msgL[MSG_COMMAND_OFFSET] == "del": #deletion command
 					if msg.payload != msgL[MSG_STRAND_OFFSET]:
-						print("neopixel mqtt del command issued with mismatched payload. [%s,%s]" % ( str(msgL[MSG_STRAND_OFFSET]), str(msg.payload) ) )
+						self.log("neopixel mqtt del command issued with mismatched payload. [%s,%s]" % ( str(msgL[MSG_STRAND_OFFSET]), str(msg.payload) ) )
 						return None
 
 					umhmsg["command"] = "del"
 					umhmsg["data"]["id"] = int(msg.payload)
 
 					if self.devices[msgIdent]["neopixel"].sendMessage(self.devices[msgIdent]["neopixel"].createMessage(umhmsg)):
-						print("neopixel mqtt issue sending del message.")
+						self.log("neopixel mqtt issue sending del message.")
 
 				elif msgL[MSG_COMMAND_OFFSET] == "gradient":
 					data = msg.payload.split(",")
@@ -353,35 +386,35 @@ class aumhMQTT:
 					umhmsg["endColor"] = eRGB
 
 					if self.devices[msgIdent]["neopixel"].np_gradient(int(msgL[MSG_STRAND_OFFSET]),umhmsg):
-						print("bad gradient.")
+						self.log("bad gradient.")
 
 				elif msgL[MSG_COMMAND_OFFSET] == "clear":
-					print("Clear message")
+					self.log("Clear message")
 					umhmsg["command"] = "clear"
 					umhmsg["data"]["id"] = int(msg.payload)
 
 					if self.devices[msgIdent]["neopixel"].sendMessage(self.devices[msgIdent]["neopixel"].createMessage(umhmsg)):
-						print("neopixel mqtt issue sending clear message.")
+						self.log("neopixel mqtt issue sending clear message.")
 
 		elif "digital" in msg.topic and "digital" in self.devices[msgIdent]:
 			if len(msgL) < 5:
-				print("Bogus digital message received.")
+				self.log("Bogus digital message received.")
 				return None
 
 			if isInt(msgL[MSG_PIN_OFFSET]):
 				if (int(msgL[MSG_PIN_OFFSET]) > 254) or (int(msgL[MSG_PIN_OFFSET]) < 0):
-					print("Bogus digital message received. [pin error]")
+					self.log("Bogus digital message received. [pin error]")
 					return None
 
 			else:
 				if (msgL[MSG_PIN_OFFSET] != "add"):
-					print("Bogus digital message received. [unexpected topic: %s]" % str(msgL[MSG_PIN_OFFSET]))
+					self.log("Bogus digital message received. [unexpected topic: %s]" % str(msgL[MSG_PIN_OFFSET]))
 					return None
 
 			if msgL[MSG_PIN_OFFSET] == "add":
 				data = msg.payload.split(",")
 				if (len(data) < 3) or (len(data) > 4):
-					print("Bogus digital message received. [incorrect number of values in add command]")
+					self.log("Bogus digital message received. [incorrect number of values in add command]")
 					return None
 
 				umhmsg = {
@@ -402,7 +435,7 @@ class aumhMQTT:
 					#We don't yet want to support gap, but when we do, it'll be here.
 
 				if self.devices[msgIdent]["digital"].sendMessage(self.devices[msgIdent]["digital"].createMessage(umhmsg)):
-					print("digital mqtt issue sending add message.")
+					self.log("digital mqtt issue sending add message.")
 
 			if len(msgL) == 7:
 
@@ -418,7 +451,7 @@ class aumhMQTT:
 					#change local pin direction
 					umhmsg["data"] = pinData
 					if msg.payload.lower() not in DIGITAL_MSG_CONTENT[msgL[MSG_PIN_CMD_OFFSET]]:
-						print("digital mqtt issue with direction message, content: %s" % str(msg.payload) )
+						self.log("digital mqtt issue with direction message, content: %s" % str(msg.payload) )
 						return None
 
 					#convert local pin mode data to umhmsg
@@ -428,12 +461,12 @@ class aumhMQTT:
 					umhmsg["command"] = "cpin"
 					#call cpin
 					if self.devices[msgIdent]["digital"].sendMessage(self.devices[msgIdent]["digital"].createMessage(umhmsg)):
-						print("digital mqtt issue sending %s message." % str(msgL[MSG_PIN_OFFSET]))
+						self.log("digital mqtt issue sending %s message." % str(msgL[MSG_PIN_OFFSET]))
 					
 				elif msgL[MSG_PIN_CMD_OFFSET] == "state" or msgL[MSG_PIN_CMD_OFFSET] == "set" :
 					pinData = self.devices[msgIdent]["digital"].getPin(int(msgL[MSG_PIN_OFFSET]))
 					if not pinData:
-						print("No pin data!")
+						self.log("No pin data!")
 						return None
 					
 					umhmsg["data"] = pinData
@@ -442,13 +475,13 @@ class aumhMQTT:
 					elif msg.payload.lower() in DIGITAL_MSG_CONTENT["state"]:
 						umhmsg["data"]["state"] = DIGITAL_MSG_CONTENT["state"][msg.payload.lower()]
 					else:
-						print("digital mqtt issue with direction message, content: %s" % str(msg.payload) )
+						self.log("digital mqtt issue with direction message, content: %s" % str(msg.payload) )
 						return None
 
 					umhmsg["command"] = "set"
 					#call cpin
 					if self.devices[msgIdent]["digital"].sendMessage(self.devices[msgIdent]["digital"].createMessage(umhmsg)):
-						print("digital mqtt issue sending direction message.")
+						self.log("digital mqtt issue sending direction message.")
 
 				elif msgL[MSG_PIN_CMD_OFFSET] == "get":
 					ltopic = "/%s/%s/%s" % ( str(self.hostname), str(SERVICEID), str(msgIdent) )
@@ -462,11 +495,11 @@ class aumhMQTT:
 					self.client.publish("%s/digital/%s/config/state" % ( str(ltopic), str(pinData["pin"]) ), str(pinData["state"]))
 					self.devices[msgIdent]["digital"].addPin(pinData)
 				else:
-					print("Bogus digital mqtt topid for cmd offset: %s" % str(msgL[MSG_PIN_CMD_OFFSET]))
+					self.log("Bogus digital mqtt topid for cmd offset: %s" % str(msgL[MSG_PIN_CMD_OFFSET]))
 					return None
 
 		else:
-			print("Unknown topic")
+			self.log("Unknown topic")
 
 	#This is for set commands which support more than one command at the same time (Thus the need to concat a bunch of commands together.)
 	def multiSet(self, setDictI, pipeD, msgIdent, timeout, timeLimit):
@@ -489,12 +522,12 @@ class aumhMQTT:
 
 				if setDictI['type'] == "neopixel":
 					if len(dIn) != 4:
-						print("multiSet neopixel mqtt issue with pipe in: '%s'" % str(dIn))
+						self.log("multiSet neopixel mqtt issue with pipe in: '%s'" % str(dIn))
 						#We might want to send a message back reporting the failure.
 						continue
 					
 					if "data" not in dIn:
-						print("multiSet neopixel mqtt issue with pipe in [no data]")
+						self.log("multiSet neopixel mqtt issue with pipe in [no data]")
 						#We might want to send a message back reporting the failure.
 						continue
 
@@ -507,9 +540,9 @@ class aumhMQTT:
 			if setDictI['type'] == "neopixel":
 				try:
 					if self.devices[msgIdent]["neopixel"].sendMessage(self.devices[msgIdent]["neopixel"].createMessage(setDictI)):
-						print("multiSet neopixel mqtt issue sending message.")
+						self.log("multiSet neopixel mqtt issue sending message.")
 				except:
-					print("multiSet neopixel mqtt, exception met when sending message.")
+					self.log("multiSet neopixel mqtt, exception met when sending message.")
 
 		except:
 			self.threadPostSema.release()
@@ -528,7 +561,7 @@ class aumhMQTT:
 
 		for device in self.devices:
 			if "mhconfig" not in self.devices[device]: #This shouldn't be possible.
-				print("UART_MH_MQTT.publisher(), no mhconfig")
+				self.log("UART_MH_MQTT.publisher(), no mhconfig")
 				continue
 
 			self.client.publish("/%s/uartmh" % str(self.hostname), str(device))
@@ -553,7 +586,7 @@ class aumhMQTT:
 							cfgData[device]["neopixel"].append({ "id":pID, "pin":pin, "length":length })
 
 				except:
-					print("MQTTHandler.publisher(), issue handling neopixel instance.")
+					self.log("MQTTHandler.publisher(), issue handling neopixel instance.")
 
 			if "digital" in self.devices[device]:
 				cfgData[device]["digital"] = []
@@ -578,7 +611,7 @@ class aumhMQTT:
 							self.devices[device]["digital"].addPin(copy.copy(lPin))
 							cfgData[device]["digital"].append( lPin )
 				except:
-					print("MQTTHandler.publisher(), issue handling digital instance.")
+					self.log("MQTTHandler.publisher(), issue handling digital instance.")
 
 		for device in cfgData:
 			ltopic = "/%s/%s/%s" % ( str(self.hostname), str(SERVICEID), str(device) )

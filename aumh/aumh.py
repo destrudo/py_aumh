@@ -211,6 +211,7 @@ class aumh:
 	#  This method performs a hard open/close of the serial device for 
 	# situations where calling open() just wasn't enough.
 	def serialReset(self):
+		time.sleep(5)
 		if not isinstance(self.ser, serial.Serial):
 			try:
 				self.ser = serial.Serial(str(self.serName), self.serialBaud, timeout=5)
@@ -346,6 +347,9 @@ class aumh:
 				while not chunkComplete:
 					if time.time() > chunkTL:
 						self.log("UART_MH.sendMessage(), chunk send timed out, abandoning attempt.")
+						if (self.serialReset()): #Try to do a serial reset
+							self.log("UART_MH.sendMessage(), serial reset failed.")
+							return 21
 						self.serialSema.release()
 						return 20
 
@@ -354,6 +358,9 @@ class aumh:
 							self.ser.write(b)
 						except:
 							self.log("UART_MH.sendMessage(), failed to write to serial interface with fragment.")
+							if (self.serialReset()): #Try to do a serial reset
+								self.log("UART_MH.sendMessage(), serial reset failed.")
+								return 21
 							self.serialSema.release()
 							#  If we have a failure to write, it's unlikely that we'll get it on the second pass.
 							# Bail out now so that the controller doesn't need to deal with bullshit.
@@ -433,7 +440,7 @@ class aumh:
 				if self.serialReset():
 					self.log("UART_MH.sendManageMessage(), serial create failed.")
 					self.serialSema.release()
-					return 2	
+					return 2
 		except:
 			self.log("UART_MH.sendManageMessage(), failed when polling serial interface.")
 			self.serialSema.release()

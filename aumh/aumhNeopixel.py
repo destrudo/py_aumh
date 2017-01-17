@@ -386,6 +386,22 @@ class aumhNeopixel:
 		if self.sendMessage(msgCtd):
 			self.log("UARTNeopixel.np_set(), sendMessage call failure.")
 
+	def np_set_bulk(self, id, dataIn):
+		data = {
+			"id":id,
+			"command":"ctrl",
+			"type":"neopixel",
+			"data": {
+				"leds":dataIn
+			}
+		}
+
+
+		msgCtd = self.createMessage(data)
+
+		if self.sendMessage(msgCtd):
+			self.log("UARTNeopixel.np_set(), sendMessage call failure.")
+
 	def np_add(self, id, pin, length):
 		data = {
 			"id":id,
